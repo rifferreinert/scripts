@@ -22,10 +22,11 @@ class shot:
         pass 
 
 class game:
-    def __init__(self, url, date, homeTeam, awayTeam, awayScore, playoffStatus, homeWins, homeLosses, awayWins, awayLosses):
+    def __init__(self, url, date, homeTeam, homeScore, awayTeam, awayScore, playoffStatus, homeWins, homeLosses, awayWins, awayLosses):
         self.url = url
         self.date = date
         self.homeTeam = homeTeam
+        self.homeScore = homeScore
         self.awayTeam = awayTeam
         self.awayScore = awayScore
         self.playoffStatus = playoffStatus
@@ -35,10 +36,25 @@ class game:
         self.awayLosses = awayLosses
         self.playByPlays = playByPlays(url, homeTeam, awayTeam)
 
-    def insert_into_table(db):
+    def evaluate_game(self, db):
+        self.insert_into_table(db)
+        cursor = db.cursor("SELECT game_id FROM game_table WHERE home_team = %s, away_team = %s, home_score = %s, away_score = %s, playoff_status = %s, game_date = %s, home_wins = %s, away_wins = %s, home_losses = %s, away_losses = %s",
+            (self.homeTeam, self.awayTeam, self.homeScore, self.awayScore, self.playoffStatus, self.date, self.homeWins,
+            self.awayWins, self.homeLosses, self.awayLosses))
+        gameID = cursor.__next__()[0] 
+        self.playByPlays.insert_into_table(gameID, db)
+
+
+    def insert_into_table(self, db):
         cursor = db.cursor()
-        cursor.execute('INSERT INTO game_table VALUES({}, {}, {}, {}, {}, {}, {}, {}, {})'.format(self.gameID, self.homeTeam, self.awayTeam, self.homeScore,
-            self.awayScore, self.playoffStatus, self.date, self.homeWins, self.awayWins, self.homeLosses, self.awayLosses))
+        print(self.homeTeam, self.awayTeam, self.homeScore, self.awayScore, self.playoffStatus, self.date, self.homeWins,
+            self.awayWins, self.homeLosses, self.awayLosses)
+        cursor.execute("INSERT INTO game_table (home_team, away_team, home_score, away_score, playoff_status, game_date, home_wins, away_wins, home_losses, away_losses) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+          (str(self.homeTeam), str(self.awayTeam), str(self.homeScore), str(self.awayScore), str(self.playoffStatus), 
+          self.date, str(self.homeWins), str(self.awayWins), str(self.homeLosses), str(self.awayLosses)))
+        db.commit()
+
+        
 
 
 def get_soup_from_link(link):
@@ -46,10 +62,19 @@ def get_soup_from_link(link):
 
 class playByPlays:
     def __init__(self, url, homeTeam, awayTeam):
-        self.box = self.get_shot_box_from_soup(get_soup_from_link(url))
         self.homeTeam = homeTeam
         self.awayTeam = awayTeam
-        
+        self.shots = self.get_shots_from_box(self.get_shot_box_from_soup(get_soup_from_link(url)))
+    
+    def insert_into_table(self, gameID, db):
+        cursor = db.cursor()
+        for s in self.shots:
+            cursor.execute("INSERT INTO shot_table (game_id, success, time_remaining, player_name, shot_number, period, home_previous_score, away_previous_score) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", 
+                (gameID, s.success, s.time, s.playerName, s.shotNumber, s.period, s.homeLastScore,
+                s.awayLastScore))
+        db.commit()
+
+
     def get_shot_box_from_soup(self, soup):
         return soup.find(class_ = 'mod-container').find(class_ = 'mod-content')
 
@@ -63,7 +88,8 @@ class playByPlays:
         numThrowsInARow = 0
         lastPlayer = ''
         player = ''
-        previousScore = '0-0'
+        awayPreviousScore = 0
+        homePreviousScore = 0
         success = 0
         half = 1
         lastThrowTime = ''
@@ -118,13 +144,14 @@ class playByPlays:
                 lastPlayer = player
                 #make the shot
                 parsedShots.append(shot(time,success, numThrowsInARow + 1, player, team, awayPreviousScore, homePreviousScore, half))
-            awayPreviousScore = re.compile(r'(\d+)-').search(ushotAttrs[2]).group(1)
-            homePreviousScore = re.compile(r'.*-(\d+)').search(ushotAttrs[2]).group(1)
+            awayPreviousScore = int(re.compile(r'(\d+)-').search(ushotAttrs[2]).group(1))
+            homePreviousScore = int(re.compile(r'.*-(\d+)').search(ushotAttrs[2]).group(1))
         return parsedShots
 
 
 class gamePage:
-    def __init__(self, url, date, db):
+    def __init__(self, url, date):
+        
         self.date = date
         self.baseUrl = re.compile(r'(.*.\.com).*').search(url).group(1)
         soup = get_soup_from_link(url)
@@ -138,7 +165,7 @@ class gamePage:
                     break
         self.boxes = self.get_game_boxes_from_soup(soup)
        
-    def evaluate_page(self):
+    def evaluate_page(self, db):
         self.games = []
         for box in self.boxes:
             ht = self.get_home_team_from_box(box)
@@ -161,10 +188,10 @@ class gamePage:
                 aw = None
                 al = None
             pageUrl = self.get_play_by_play_link_from_box(box)
-            g = game(date = self.date, homeTeam = ht, awayTeam = at, awayScore = ascore, playoffStatus = ps,
+            g = game(date = self.date, homeTeam = ht, awayTeam = at, homeScore = hs, awayScore = ascore, playoffStatus = ps,
                 homeWins = hw, homeLosses = hl, awayWins = aw, awayLosses = al, url = pageUrl)
             self.games.append(g)
-           # g.insert_into_table(db)
+            g.evaluate_game(db)
 
     def get_game_boxes_from_soup(self, soup):
         return list(filter(lambda x : x.find_next(href = re.compile('playbyplay')) != None, soup.find_all(attrs={'class': re.compile('gameCount')})))
