@@ -18,11 +18,10 @@ class shot:
         self.awayLastScore = awayLastScore
         self.period = period
     
-    def insert_into_table(self, db):
-        pass 
 
 class game:
     def __init__(self, url, date, homeTeam, homeScore, awayTeam, awayScore, playoffStatus, homeWins, homeLosses, awayWins, awayLosses):
+        print('game!!!')
         self.url = url
         self.date = date
         self.homeTeam = homeTeam
@@ -38,21 +37,14 @@ class game:
 
     def evaluate_game(self, db):
         self.insert_into_table(db)
-        cursor = db.cursor("SELECT game_id FROM game_table WHERE home_team = %s, away_team = %s, home_score = %s, away_score = %s, playoff_status = %s, game_date = %s, home_wins = %s, away_wins = %s, home_losses = %s, away_losses = %s",
-            (self.homeTeam, self.awayTeam, self.homeScore, self.awayScore, self.playoffStatus, self.date, self.homeWins,
-            self.awayWins, self.homeLosses, self.awayLosses))
-        gameID = cursor.__next__()[0] 
-        self.playByPlays.insert_into_table(gameID, db)
-
+        self.playByPlays.insert_into_table(self.gameID, db)
 
     def insert_into_table(self, db):
         cursor = db.cursor()
-        print(self.homeTeam, self.awayTeam, self.homeScore, self.awayScore, self.playoffStatus, self.date, self.homeWins,
-            self.awayWins, self.homeLosses, self.awayLosses)
         cursor.execute("INSERT INTO game_table (home_team, away_team, home_score, away_score, playoff_status, game_date, home_wins, away_wins, home_losses, away_losses) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
           (str(self.homeTeam), str(self.awayTeam), str(self.homeScore), str(self.awayScore), str(self.playoffStatus), 
           self.date, str(self.homeWins), str(self.awayWins), str(self.homeLosses), str(self.awayLosses)))
-        db.commit()
+        self.gameID = cursor.lastrowid
 
         
 
@@ -65,18 +57,22 @@ class playByPlays:
         self.homeTeam = homeTeam
         self.awayTeam = awayTeam
         self.shots = self.get_shots_from_box(self.get_shot_box_from_soup(get_soup_from_link(url)))
+        if not self.shots:
+            raise Exception('NoShots')
     
     def insert_into_table(self, gameID, db):
         cursor = db.cursor()
         for s in self.shots:
-            cursor.execute("INSERT INTO shot_table (game_id, success, time_remaining, player_name, shot_number, period, home_previous_score, away_previous_score) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", 
+            cursor.execute("INSERT INTO shot_table (game_id, success, time_remaining, player_name, shot_number, period, home_previous_score, away_previous_score) VALUES(%s, %s, %s, %s, %s, %s, %s, %s)", 
                 (gameID, s.success, s.time, s.playerName, s.shotNumber, s.period, s.homeLastScore,
                 s.awayLastScore))
-        db.commit()
 
 
     def get_shot_box_from_soup(self, soup):
-        return soup.find(class_ = 'mod-container').find(class_ = 'mod-content')
+        shotBox =  soup.find(class_ = 'mod-container').find(class_ = 'mod-content')
+        if not shotBox:
+            raise Exception('NoShotBox')
+        return shotBox
 
     def get_shots_from_box(self, box):
         parsedShots = []
@@ -100,18 +96,22 @@ class playByPlays:
                 continue
             time = datetime.datetime.strptime(ushotAttrs[0], '%M:%S')
             #if we went back in time that means we are in the next half of the game
+
             if previousTime == '':
                 previousTime = time
             if (previousTime - time).days < 0:
-                previousTime = datetime.datetime.strptime('20:00', '%M:%S')
+                previousTime = '' 
                 half += 1
                 numThrowsInARow = 0
+            
             if ushotAttrs[1] == '\xa0':
                 action = ushotAttrs[3]
                 team = self.homeTeam
             else:
                 action = ushotAttrs[1]
                 team = self.awayTeam
+            if not action:
+                continue
             #check to make sure it's a free throw
             if re.compile(r'(?i)Free\s+Throw').search(action):
                 #find player name
@@ -134,7 +134,7 @@ class playByPlays:
                 elif re.compile(r'(?i)missed').search(action):
                     success = 0
                 else:
-                    success = 'unknown'
+                    success = 'NULL'
                 #run logic to count consecutive shots
                 if lastPlayer == player and time == lastThrowTime:
                     numThrowsInARow += 1
@@ -146,14 +146,15 @@ class playByPlays:
                 parsedShots.append(shot(time,success, numThrowsInARow + 1, player, team, awayPreviousScore, homePreviousScore, half))
             awayPreviousScore = int(re.compile(r'(\d+)-').search(ushotAttrs[2]).group(1))
             homePreviousScore = int(re.compile(r'.*-(\d+)').search(ushotAttrs[2]).group(1))
+            previousTime = time 
         return parsedShots
 
 
 class gamePage:
     def __init__(self, url, date):
-        
+        print(date) 
         self.date = date
-        self.baseUrl = re.compile(r'(.*.\.com).*').search(url).group(1)
+        self.baseUrl = re.compile(r'(.*\.com).*').search(url).group(1)
         soup = get_soup_from_link(url)
         gameSelection = soup.find(attrs = {'name' : 'Conference List'}).find(lambda x : x.has_attr('selected')).string
         #make sure we are looking at the right page
@@ -179,22 +180,28 @@ class gamePage:
                 hw = re.search(r'(\d+)-\d+' ,homeRecord).group(1)
                 hl = re.search(r'\d+-(\d+)', homeRecord).group(1)
             else:
-                hw = None
-                hl = None
+                hw = 'NULL'
+                hl = 'NULL'
             if awayRecord:
                 aw = re.search(r'(\d+)-\d+', awayRecord).group(1)
                 al = re.search(r'\d+-(\d+)', awayRecord).group(1) 
             else:
-                aw = None
-                al = None
+                aw = 'NULL'
+                al = 'NULL'
             pageUrl = self.get_play_by_play_link_from_box(box)
             g = game(date = self.date, homeTeam = ht, awayTeam = at, homeScore = hs, awayScore = ascore, playoffStatus = ps,
                 homeWins = hw, homeLosses = hl, awayWins = aw, awayLosses = al, url = pageUrl)
             self.games.append(g)
-            g.evaluate_game(db)
+            try:
+                g.evaluate_game(db)
+                db.commit()
+            except 'NoShots':
+                print('No Shots For {}'.format(pageUrl))
+            except 'NoShotBox':
+                print('No Shot Box For {}'.format(pageUrl))
 
     def get_game_boxes_from_soup(self, soup):
-        return list(filter(lambda x : x.find_next(href = re.compile('playbyplay')) != None, soup.find_all(attrs={'class': re.compile('gameCount')})))
+        return list(filter(lambda x : x.find_next(href = re.compile('playbyplay')) != None, soup.find_all(class_ = re.compile('gameCount'))))
 
     def get_game_boxes_from_url(self, url):
         return get_game_boxes_from_soup(get_soup_from_link(url))
