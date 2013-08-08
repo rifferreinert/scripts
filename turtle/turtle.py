@@ -6,6 +6,7 @@ import re
 from bs4 import BeautifulSoup as bs
 from urllib.request import urlopen
 import mysql.connector
+import sys
 
 class shot:
     def __init__(self, time, success, shotNumber, playerName, teamName, homeLastScore, awayLastScore , period, side):
@@ -62,15 +63,16 @@ class playByPlays:
         self.homeTeam = homeTeam
         self.awayTeam = awayTeam
         self.shots = self.get_shots_from_box(self.get_shot_box_from_soup(get_soup_from_link(url)))
-        if not self.shots:
-            raise Exception('NoShots')
     
     def insert_into_table(self, gameID, db):
         cursor = db.cursor()
-        for s in self.shots:
-            cursor.execute("INSERT INTO shot_table (game_id, success, time_remaining, player_name, shot_number, period, home_previous_score, away_previous_score, team) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-                (gameID, s.success, s.time, s.playerName, s.shotNumber, s.period, s.homeLastScore,
-                s.awayLastScore, s.side))
+        if self.shots:
+            for s in self.shots:
+                cursor.execute("INSERT INTO shot_table (game_id, success, time_remaining, player_name, shot_number, period, home_previous_score, away_previous_score, team) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                    (gameID, s.success, s.time, s.playerName, s.shotNumber, s.period, s.homeLastScore,
+                    s.awayLastScore, s.side))
+        else:
+            cursor.execute('DELETE FROM game_table WHERE game_id = ?' , (gameID,))
 
 
     def get_shot_box_from_soup(self, soup):
@@ -78,9 +80,11 @@ class playByPlays:
             shotBox =  soup.find(class_ = 'mod-container').find(class_ = 'mod-content')
             return shotBox
         except:
-            raise Exception('NoShotBox')
+            return None 
 
     def get_shots_from_box(self, box):
+        if not box:
+            return None
         parsedShots = []
         shots = box.find_all(class_ = re.compile(r'(odd)|(even)'))
         action = ''
@@ -203,7 +207,9 @@ class gamePage:
                 g.evaluate_game(db)
                 db.commit()
             except :
+                
                 print('No Shots For {}'.format(pageUrl))
+                print(sys.exc_info())
 
     def get_game_boxes_from_soup(self, soup):
         return list(filter(lambda x : x.find_next(href = re.compile('playbyplay')) != None, soup.find_all(class_ = re.compile('gameCount'))))
