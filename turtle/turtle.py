@@ -6,24 +6,27 @@ import re
 from bs4 import BeautifulSoup as bs
 from urllib.request import urlopen
 import mysql.connector
+import sys
 
 class shot:
-    def __init__(self, time, success, shotNumber, playerName, teamName, lastScore, period):
+    def __init__(self, time, success, shotNumber, playerName, teamName, homeLastScore, awayLastScore , period, side):
         self.time = time
         self.success = success
         self.shotNumber = shotNumber
         self.playerName = playerName
         self.teamName = teamName
-        self.lastScore = lastScore
-        period
+        self.homeLastScore = homeLastScore
+        self.awayLastScore = awayLastScore
+        self.period = period
+        self.side = side
     
-    def insert_into_table(self, db):
-        pass 
 
 class game:
-    def __init__(self, date, homeTeam, awayTeam, awayScore, playoffStatus, homeWins, homeLosses, awayWins, awayLosses):
+    def __init__(self, url, date, homeTeam, homeScore, awayTeam, awayScore, playoffStatus, homeWins, homeLosses, awayWins, awayLosses):
+        self.url = url
         self.date = date
         self.homeTeam = homeTeam
+        self.homeScore = homeScore
         self.awayTeam = awayTeam
         self.awayScore = awayScore
         self.playoffStatus = playoffStatus
@@ -31,26 +34,57 @@ class game:
         self.homeLosses = homeLosses
         self.awayWins = awayWins
         self.awayLosses = awayLosses
+        self.playByPlays = playByPlays(url, homeTeam, awayTeam)
 
-    def insert_into_table(db):
+    def evaluate_game(self, db):
+        self.insert_into_table(db)
+        self.playByPlays.insert_into_table(self.gameID, db)
+
+    def insert_into_table(self, db):
         cursor = db.cursor()
-        cursor.execute('INSERT INTO game_table VALUES({}, {}, {}, {}, {}, {}, {}, {}, {})'.format(self.gameID, self.homeTeam, self.awayTeam, self.homeScore,
-            self.awayScore, self.playoffStatus, self.date, self.homeWins, self.awayWins, self.homeLosses, self.awayLosses))
+        cursor.execute("INSERT INTO game_table (home_team, away_team, home_score, away_score, playoff_status, game_date, home_wins, away_wins, home_losses, away_losses) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          (str(self.homeTeam), str(self.awayTeam), str(self.homeScore), str(self.awayScore), str(self.playoffStatus), 
+          self.date, str(self.homeWins), str(self.awayWins), str(self.homeLosses), str(self.awayLosses)))
+        self.gameID = cursor.lastrowid
+
+        
 
 
 def get_soup_from_link(link):
-    return bs(urlopen(link))
+    while True:
+        try:
+            return bs(urlopen(link))
+        except:
+            print ('http error...trying again')
+            continue
 
 class playByPlays:
     def __init__(self, url, homeTeam, awayTeam):
-        self.box = self.get_shot_box_from_soup(get_soup_from_link(url))
         self.homeTeam = homeTeam
         self.awayTeam = awayTeam
-        
+        self.shots = self.get_shots_from_box(self.get_shot_box_from_soup(get_soup_from_link(url)))
+    
+    def insert_into_table(self, gameID, db):
+        cursor = db.cursor()
+        if self.shots:
+            for s in self.shots:
+                cursor.execute("INSERT INTO shot_table (game_id, success, time_remaining, player_name, shot_number, period, home_previous_score, away_previous_score, team) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                    (gameID, s.success, s.time, s.playerName, s.shotNumber, s.period, s.homeLastScore,
+                    s.awayLastScore, s.side))
+        else:
+            cursor.execute('DELETE FROM game_table WHERE game_id = ?' , (gameID,))
+
+
     def get_shot_box_from_soup(self, soup):
-        return soup.find(class_ = 'mod-container').find(class_ = 'mod-content')
+        try:
+            shotBox =  soup.find(class_ = 'mod-container').find(class_ = 'mod-content')
+            return shotBox
+        except:
+            return None 
 
     def get_shots_from_box(self, box):
+        if not box:
+            return None
         parsedShots = []
         shots = box.find_all(class_ = re.compile(r'(odd)|(even)'))
         action = ''
@@ -60,7 +94,8 @@ class playByPlays:
         numThrowsInARow = 0
         lastPlayer = ''
         player = ''
-        previousScore = '0-0'
+        awayPreviousScore = 0
+        homePreviousScore = 0
         success = 0
         half = 1
         lastThrowTime = ''
@@ -71,19 +106,24 @@ class playByPlays:
                 continue
             time = datetime.datetime.strptime(ushotAttrs[0], '%M:%S')
             #if we went back in time that means we are in the next half of the game
+
             if previousTime == '':
                 previousTime = time
             if (previousTime - time).days < 0:
-                previousTime = datetime.datetime.strptime('20:00', '%M:%S')
+                previousTime = '' 
                 half += 1
                 numThrowsInARow = 0
-            previousScore = ushotAttrs[2]
+            
             if ushotAttrs[1] == '\xa0':
                 action = ushotAttrs[3]
-                team = self.awayTeam
+                team = self.homeTeam
+                side= 'home'
             else:
                 action = ushotAttrs[1]
-                team = self.homeTeam
+                team = self.awayTeam
+                side= 'away'
+            if not action:
+                continue
             #check to make sure it's a free throw
             if re.compile(r'(?i)Free\s+Throw').search(action):
                 #find player name
@@ -106,7 +146,7 @@ class playByPlays:
                 elif re.compile(r'(?i)missed').search(action):
                     success = 0
                 else:
-                    success = 'unknown'
+                    success = 'NULL'
                 #run logic to count consecutive shots
                 if lastPlayer == player and time == lastThrowTime:
                     numThrowsInARow += 1
@@ -115,47 +155,64 @@ class playByPlays:
                 lastThrowTime = time
                 lastPlayer = player
                 #make the shot
-                parsedShots.append(shot(time,success, numThrowsInARow + 1, player, team, previousScore, half))
+                parsedShots.append(shot(time,success, numThrowsInARow + 1, player, team, awayPreviousScore, homePreviousScore, half, side))
+            awayPreviousScore = int(re.compile(r'(\d+)-').search(ushotAttrs[2]).group(1))
+            homePreviousScore = int(re.compile(r'.*-(\d+)').search(ushotAttrs[2]).group(1))
+            previousTime = time 
         return parsedShots
 
 
 class gamePage:
-    def __init__(self, url, date, db):
+    def __init__(self, url, date):
         self.date = date
+        self.baseUrl = re.compile(r'(.*\.com).*').search(url).group(1)
         soup = get_soup_from_link(url)
-        gameSelection =soup.find(attrs = {'name' : 'Conference List'}).find(lambda x : x.has_attr('selected')).string
+        gameSelection = soup.find(attrs = {'name' : 'Conference List'}).find(lambda x : x.has_attr('selected')).string
         #make sure we are looking at the right page
-        print(gameSelection)
         if gameSelection != 'NCAA Tourney' and gameSelection != 'All':
-            print('change the url!')
             for child in soup.find(attrs = {'name' : 'Conference List'}).children:
                 if child.string == 'NCAA Tourney' or child.string == 'All':
                     url = re.sub(r'(.*)\?.*' ,r'\1' + child['value'], url) 
-                    print('new url:' + url)
                     soup = get_soup_from_link(url)
                     break
-        print(url)
         self.boxes = self.get_game_boxes_from_soup(soup)
        
-    def evaluatePage(self):
+    def evaluate_page(self, db):
+        self.games = []
         for box in self.boxes:
             ht = self.get_home_team_from_box(box)
             at = self.get_away_team_from_box(box)
             hs = self.get_home_score_from_box(box)
             ascore = self.get_away_score_from_box(box)
             ps = self.get_playoff_status_from_box(box)
-            homeRecord = get_home_record_from_box(box)
-            awayRecord = get_away_record_from_box(box)
-            hw = re.search(r'(\d+)-\d+' ,homeRecord).group(1)
-            hl = re.search(r'\d+-(\d+)', homeRecord).group(1)
-            aw = re.search(r'(\d+)-\d+', awayRecord).group(1)
-            al = re.search(r'\d+-(\d+)', awayRecord).group(1) 
-            g = game(date = self.date, homeTeam = ht, awayTeam = at, awayScore = ascore, playoffStatus = ps,
-                homeWins = hw, homeLosses hl, awayWins = aw, awayLosses = al)
-            g.insert_into_table(db)
+            homeRecord = self.get_home_record_from_box(box)
+            awayRecord = self.get_away_record_from_box(box)
+            if homeRecord:
+                hw = re.search(r'(\d+)-\d+' ,homeRecord).group(1)
+                hl = re.search(r'\d+-(\d+)', homeRecord).group(1)
+            else:
+                hw = 'NULL'
+                hl = 'NULL'
+            if awayRecord:
+                aw = re.search(r'(\d+)-\d+', awayRecord).group(1)
+                al = re.search(r'\d+-(\d+)', awayRecord).group(1) 
+            else:
+                aw = 'NULL'
+                al = 'NULL'
+            pageUrl = self.get_play_by_play_link_from_box(box)
+            g = game(date = self.date, homeTeam = ht, awayTeam = at, homeScore = hs, awayScore = ascore, playoffStatus = ps,
+                homeWins = hw, homeLosses = hl, awayWins = aw, awayLosses = al, url = pageUrl)
+            self.games.append(g)
+            try:
+                g.evaluate_game(db)
+                db.commit()
+            except :
+                
+                print('No Shots For {}'.format(pageUrl))
+                print(sys.exc_info())
 
     def get_game_boxes_from_soup(self, soup):
-        return list(filter(lambda x : x.find_next(href = re.compile('playbyplay')) != None, soup.find_all(attrs={'class': re.compile('gameCount')})))
+        return list(filter(lambda x : x.find_next(href = re.compile('playbyplay')) != None, soup.find_all(class_ = re.compile('gameCount'))))
 
     def get_game_boxes_from_url(self, url):
         return get_game_boxes_from_soup(get_soup_from_link(url))
@@ -169,14 +226,22 @@ class gamePage:
     def get_soups_from_links(self, ls):
         return list(map(get_soup_from_link, ls)) 
 
-    def get_play_by_play_link_from_box(self, box, url):
-        return url + box.find_next(href = re.compile('playbyplay'))['href']
+    def get_play_by_play_link_from_box(self, box):
+        return self.baseUrl + box.find_next(href = re.compile('playbyplay'))['href']
 
     def get_home_team_from_box(self, box):
-        return box.find_next(class_ = 'team home').find_next(class_ = 'team-capsule').find_next(class_ = 'team-name').find_next(id = re.compile('TeamName')).a.string
+        teamLink = box.find_next(class_ = 'team home').find_next(class_ = 'team-capsule').find_next(class_ = 'team-name').find_next(id = re.compile('TeamName'))
+        if teamLink.a:
+            return teamLink.a.string
+        else:
+            return teamLink.string
 
     def get_away_team_from_box(self, box):
-        return box.find_next(class_ = 'team visitor').find_next(class_ = 'team-capsule').find_next(class_ = 'team-name').find_next(id = re.compile('TeamName')).a.string
+        teamLink = box.find_next(class_ = 'team visitor').find_next(class_ = 'team-capsule').find_next(class_ = 'team-name').find_next(id = re.compile('TeamName'))
+        if teamLink.a:
+            return teamLink.a.string
+        else:
+            return teamLink.string
 
     def get_home_score_from_box(self, box):
         return box.find_next(class_ = 'team home').find_next(class_ = 'score').find_next(class_ = 'final').string
@@ -185,17 +250,16 @@ class gamePage:
         return box.find_next(class_ = 'team visitor').find_next(class_ = 'score').find_next(class_ = 'final').string
 
     def get_home_record_from_box(self, box):
-        match =  re.compile(r'\((\d+-\d+),.*').search((box.find_next(class_ = 'team home').find_next(class_ = 'team-capsule').find_next(class_ = 'record').string)).group(1)
+        match =  re.compile(r'\((\d+-\d+),.*').search(box.find_next(class_ = 'team home').find_next(class_ = 'team-capsule').find_next(class_ = 'record').string)
         if match:
-            return match
+            return match.group(1)
         else:
             return False
 
     def get_away_record_from_box(self, box):
-        match = re.compile(r'\((\d+-\d+),.*').search((box.find_next(class_ = 'team visitor')
-            .find_next(class_ = 'team-capsule').find_next(class_ = 'record').string))
+        match = re.compile(r'\((\d+-\d+),.*').search(box.find_next(class_ = 'team visitor').find_next(class_ = 'team-capsule').find_next(class_ = 'record').string)
         if match :
-            return match
+            return match.group(1)
         else:
             return False
 
@@ -205,4 +269,3 @@ class gamePage:
             return 'No Note'
         else:
             return note
-
