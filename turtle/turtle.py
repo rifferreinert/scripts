@@ -5,7 +5,6 @@ from datetime import timedelta
 import re
 from bs4 import BeautifulSoup as bs
 from urllib.request import urlopen
-import mysql.connector
 import sys
 
 class shot:
@@ -19,8 +18,13 @@ class shot:
         self.awayLastScore = awayLastScore
         self.period = period
         self.side = side
-    
-
+   
+   def insert_into_table(self, db, gameID): 
+        cursor = cursor.db()
+        cursor.execute("INSERT INTO shot_table (game_id, success, time_remaining, player_name, shot_number, period, home_previous_score, away_previous_score, team) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                    (gameID, self.success, self.time, self.playerName, self.shotNumber, self.period, self.homeLastScore,
+                    self.awayLastScore, self.side))
+        
 class game:
     def __init__(self, url, date, homeTeam, homeScore, awayTeam, awayScore, playoffStatus, homeWins, homeLosses, awayWins, awayLosses):
         self.url = url
@@ -34,11 +38,11 @@ class game:
         self.homeLosses = homeLosses
         self.awayWins = awayWins
         self.awayLosses = awayLosses
-        self.playByPlays = playByPlays(url, homeTeam, awayTeam)
 
     def evaluate_game(self, db):
+        pbp = playByPlasys(self.url, self.homeTeam, self.awayTeam)
         self.insert_into_table(db)
-        self.playByPlays.insert_into_table(self.gameID, db)
+        pbp.evaluate_plays(self.gameID, db)
 
     def insert_into_table(self, db):
         cursor = db.cursor()
@@ -64,13 +68,11 @@ class playByPlays:
         self.awayTeam = awayTeam
         self.shots = self.get_shots_from_box(self.get_shot_box_from_soup(get_soup_from_link(url)))
     
-    def insert_into_table(self, gameID, db):
+    def evaluate_plays(self, gameID, db):
         cursor = db.cursor()
         if self.shots:
             for s in self.shots:
-                cursor.execute("INSERT INTO shot_table (game_id, success, time_remaining, player_name, shot_number, period, home_previous_score, away_previous_score, team) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-                    (gameID, s.success, s.time, s.playerName, s.shotNumber, s.period, s.homeLastScore,
-                    s.awayLastScore, s.side))
+                s.insert_into_table(gameID)        
         else:
             cursor.execute('DELETE FROM game_table WHERE game_id = ?' , (gameID,))
 
