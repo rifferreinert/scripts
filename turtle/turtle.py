@@ -7,6 +7,25 @@ from bs4 import BeautifulSoup as bs
 from urllib.request import urlopen
 import sys
 
+def get_soup_from_link(link):
+    while True:
+        try:
+            return bs(urlopen(link))
+        except:
+            print ('http error...trying again')
+            continue
+
+def insert_into_database(shot, game, db):
+    cursor.execute("""INSERT INTO game_table (home_team, away_team, home_score, away_score, playoff_status, game_date, home_wins, away_wins, home_losses, away_losses) 
+                   VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (str(self.homeTeam), str(self.awayTeam), str(self.homeScore), str(self.awayScore), str(self.playoffStatus), 
+                   self.date, str(self.homeWins), str(self.awayWins), str(self.homeLosses), str(self.awayLosses)))
+    gameID = cursor.lastrowid
+    cursor.execute("""INSERT INTO shot_table (game_id, success, time_remaining, player_name, shot_number, period, home_previous_score, away_previous_score, team) 
+                   VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
+                  (gameID, self.success, self.time, self.playerName, self.shotNumber, self.period, self.homeLastScore,
+                  self.awayLastScore, self.side))
+    db.commit()
+
 class shot:
     def __init__(self, time, success, shotNumber, playerName, teamName, homeLastScore, awayLastScore , period, side):
         self.time = time
@@ -19,12 +38,6 @@ class shot:
         self.period = period
         self.side = side
    
-   def insert_into_table(self, db, gameID): 
-        cursor = cursor.db()
-        cursor.execute("INSERT INTO shot_table (game_id, success, time_remaining, player_name, shot_number, period, home_previous_score, away_previous_score, team) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-                    (gameID, self.success, self.time, self.playerName, self.shotNumber, self.period, self.homeLastScore,
-                    self.awayLastScore, self.side))
-        
 class game:
     def __init__(self, url, date, homeTeam, homeScore, awayTeam, awayScore, playoffStatus, homeWins, homeLosses, awayWins, awayLosses):
         self.url = url
@@ -40,27 +53,10 @@ class game:
         self.awayLosses = awayLosses
 
     def evaluate_game(self, db):
-        pbp = playByPlasys(self.url, self.homeTeam, self.awayTeam)
-        self.insert_into_table(db)
-        pbp.evaluate_plays(self.gameID, db)
-
-    def insert_into_table(self, db):
-        cursor = db.cursor()
-        cursor.execute("INSERT INTO game_table (home_team, away_team, home_score, away_score, playoff_status, game_date, home_wins, away_wins, home_losses, away_losses) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          (str(self.homeTeam), str(self.awayTeam), str(self.homeScore), str(self.awayScore), str(self.playoffStatus), 
-          self.date, str(self.homeWins), str(self.awayWins), str(self.homeLosses), str(self.awayLosses)))
-        self.gameID = cursor.lastrowid
-
-        
-
-
-def get_soup_from_link(link):
-    while True:
-        try:
-            return bs(urlopen(link))
-        except:
-            print ('http error...trying again')
-            continue
+        pbp = playByPlays(self.url, self.homeTeam, self.awayTeam)
+        if pbp.shots:
+            for s in pbp.shots:
+                insert_into_database(s, self, db)
 
 class playByPlays:
     def __init__(self, url, homeTeam, awayTeam):
@@ -68,15 +64,6 @@ class playByPlays:
         self.awayTeam = awayTeam
         self.shots = self.get_shots_from_box(self.get_shot_box_from_soup(get_soup_from_link(url)))
     
-    def evaluate_plays(self, gameID, db):
-        cursor = db.cursor()
-        if self.shots:
-            for s in self.shots:
-                s.insert_into_table(gameID)        
-        else:
-            cursor.execute('DELETE FROM game_table WHERE game_id = ?' , (gameID,))
-
-
     def get_shot_box_from_soup(self, soup):
         try:
             shotBox =  soup.find(class_ = 'mod-container').find(class_ = 'mod-content')
@@ -207,9 +194,7 @@ class gamePage:
             self.games.append(g)
             try:
                 g.evaluate_game(db)
-                db.commit()
             except :
-                
                 print('No Shots For {}'.format(pageUrl))
                 print(sys.exc_info())
 
