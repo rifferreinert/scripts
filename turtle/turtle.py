@@ -6,24 +6,26 @@ import re
 from bs4 import BeautifulSoup as bs
 from urllib.request import urlopen
 import sys
+import urllib.error
 
 def get_soup_from_link(link):
     while True:
         try:
             return bs(urlopen(link))
-        except:
+        except urllib.error.HTTPError:
             print ('http error...trying again')
             continue
 
 def insert_into_database(shot, game, db):
+    cursor = db.cursor()
     cursor.execute("""INSERT INTO game_table (home_team, away_team, home_score, away_score, playoff_status, game_date, home_wins, away_wins, home_losses, away_losses) 
-                   VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (str(self.homeTeam), str(self.awayTeam), str(self.homeScore), str(self.awayScore), str(self.playoffStatus), 
-                   self.date, str(self.homeWins), str(self.awayWins), str(self.homeLosses), str(self.awayLosses)))
+                   VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (str(game.homeTeam), str(game.awayTeam), str(game.homeScore), str(game.awayScore), str(game.playoffStatus), 
+                   game.date, str(game.homeWins), str(game.awayWins), str(game.homeLosses), str(game.awayLosses)))
     gameID = cursor.lastrowid
     cursor.execute("""INSERT INTO shot_table (game_id, success, time_remaining, player_name, shot_number, period, home_previous_score, away_previous_score, team) 
                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
-                  (gameID, self.success, self.time, self.playerName, self.shotNumber, self.period, self.homeLastScore,
-                  self.awayLastScore, self.side))
+                  (gameID, shot.success, shot.time, shot.playerName, shot.shotNumber, shot.period, shot.homeLastScore,
+                  shot.awayLastScore, shot.side))
     db.commit()
 
 class shot:
@@ -199,7 +201,7 @@ class gamePage:
                 print(sys.exc_info())
 
     def get_game_boxes_from_soup(self, soup):
-        return list(filter(lambda x : x.find_next(href = re.compile('playbyplay')) != None, soup.find_all(class_ = re.compile('gameCount'))))
+        return list(filter(lambda x : x.find(href = re.compile('playbyplay')) != None, soup.find_all(class_ = re.compile('gameCount'))))
 
     def get_game_boxes_from_url(self, url):
         return get_game_boxes_from_soup(get_soup_from_link(url))

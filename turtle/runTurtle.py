@@ -22,6 +22,7 @@ def main(url, startDate, endDate, dbName):
         print('scraping {}'.format(u))
         page = turtle.gamePage(u, dates[i])
         page.evaluate_page(db)
+    db.close()
 
         
         
