@@ -2,7 +2,7 @@ import datetime
 import turtle
 import sqlite3
 
-def main(url, startDate, endDate, dbName):
+def main(url, baseUrl startDate, endDate, dbName):
     open(dbName, 'w').close()
     db = sqlite3.connect(dbName)
     cursor = db.cursor() 
@@ -18,9 +18,9 @@ def main(url, startDate, endDate, dbName):
         dates.append(sd)
         urls.append(url + '?date=' + sd.strftime('%Y%m%d') + '&confId=50')
         sd += oneDay
-    for i, u in enumerate(urls):
-        print('scraping {}'.format(u))
-        page = turtle.gamePage(u, dates[i])
+    print('about to load game pages')
+    pages = turtle.get_game_pages(urls, baseUrl)
+    for page in pages:
         page.evaluate_page(db)
     db.close()
 

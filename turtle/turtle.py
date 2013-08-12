@@ -3,18 +3,22 @@ from datetime import time
 from datetime import date
 from datetime import timedelta
 import re
-from bs4 import BeautifulSoup as bs
-from urllib.request import urlopen
 import sys
-import urllib.error
+import scraper
 
-def get_soup_from_link(link):
-    while True:
-        try:
-            return bs(urlopen(link))
-        except urllib.error.HTTPError:
-            print ('http error...trying again')
-            continue
+def get_game_pages(urlList, baseUrl):
+    """quickly makes game pages from a list or urls"""
+    exp = re.compile(r'date=(\d+)')
+    urlList = list(urlList)
+    return map(lambda x : gamePage(x[0], exp.search(x[1]).group(1), baseUrl), zip(scraper.soup_links(urlList, 40, 0), urlList)) 
+
+def get_play_by_plays(triples):  
+    """quickly makes an itterator of playbyplays from a list of (url, hometeam, awayteam)"""
+    triples = list(triples)
+    return map(lambda x : playByPlays(x[0], x[1], x[2]), zip(
+        scraper.soup_links(map(lambda x : x[0], triples) , 50, 0), 
+        map(lambda x : x[1], triples), 
+        map(lambda x : x[2], triples)))
 
 def insert_into_database(shot, game, db):
     cursor = db.cursor()
@@ -55,16 +59,19 @@ class game:
         self.awayLosses = awayLosses
 
     def evaluate_game(self, db):
-        pbp = playByPlays(self.url, self.homeTeam, self.awayTeam)
-        if pbp.shots:
-            for s in pbp.shots:
+        print('evaluate_game')
+        if self.pbp.shots:
+            for s in self.pbp.shots:
                 insert_into_database(s, self, db)
 
 class playByPlays:
-    def __init__(self, url, homeTeam, awayTeam):
+    def __init__(self, soup, homeTeam, awayTeam):
+        print('making a play by play')
         self.homeTeam = homeTeam
         self.awayTeam = awayTeam
-        self.shots = self.get_shots_from_box(self.get_shot_box_from_soup(get_soup_from_link(url)))
+       # self.shots = self.get_shots_from_box(self.get_shot_box_from_soup(get_soup_from_link(url)))
+        self.soup = soup
+        self.shots = self.get_shot_box_from_soup(self.soup)
     
     def get_shot_box_from_soup(self, soup):
         try:
@@ -154,21 +161,21 @@ class playByPlays:
 
 
 class gamePage:
-    def __init__(self, url, date):
-        self.date = date
-        self.baseUrl = re.compile(r'(.*\.com).*').search(url).group(1)
-        soup = get_soup_from_link(url)
-        gameSelection = soup.find(attrs = {'name' : 'Conference List'}).find(lambda x : x.has_attr('selected')).string
-        #make sure we are looking at the right page
-        if gameSelection != 'NCAA Tourney' and gameSelection != 'All':
-            for child in soup.find(attrs = {'name' : 'Conference List'}).children:
-                if child.string == 'NCAA Tourney' or child.string == 'All':
-                    url = re.sub(r'(.*)\?.*' ,r'\1' + child['value'], url) 
-                    soup = get_soup_from_link(url)
-                    break
-        self.boxes = self.get_game_boxes_from_soup(soup)
+    def __init__(self, soup, date, baseUrl):
+        self.date = date 
+        self.baseUrl = baseUrl
+        self.soup = soup
+ #      gameSelection = soup.find(attrs = {'name' : 'Conference List'}).find(lambda x : x.has_attr('selected')).string
+ #      #make sure we are looking at the right page
+ #      if gameSelection != 'NCAA Tourney' and gameSelection != 'All':
+ #          for child in soup.find(attrs = {'name' : 'Conference List'}).children:
+ #              if child.string == 'NCAA Tourney' or child.string == 'All':
+ #                  url = re.sub(r'(.*)\?.*' ,r'\1' + child['value'], url) 
+ #                  soup = get_soup_from_link(url)
+ #                  break
        
     def evaluate_page(self, db):
+        self.boxes = self.get_game_boxes_from_soup(self.soup)
         self.games = []
         for box in self.boxes:
             ht = self.get_home_team_from_box(box)
@@ -194,29 +201,27 @@ class gamePage:
             g = game(date = self.date, homeTeam = ht, awayTeam = at, homeScore = hs, awayScore = ascore, playoffStatus = ps,
                 homeWins = hw, homeLosses = hl, awayWins = aw, awayLosses = al, url = pageUrl)
             self.games.append(g)
-            try:
-                g.evaluate_game(db)
-            except :
-                print('No Shots For {}'.format(pageUrl))
-                print(sys.exc_info())
+#           try:
+#               g.evaluate_game(db)
+#           except :
+#               print('No Shots For {}'.format(pageUrl))
+#               print(sys.exc_info())
+
+        #download playbyplays and add them to the game objects
+        for x in get_play_by_plays(map(lambda x : (x.url, x.homeTeam, x.awayTeam), self.games)):
+            print(type(x))
+
+        for g, plays in zip(self.games, get_play_by_plays(map(lambda x : (x.url, x.homeTeam, x.awayTeam), self.games))):
+            print('in evaluate loop')
+            g.pbp = plays
+            g.evaluate_game(db)
+
 
     def get_game_boxes_from_soup(self, soup):
         return list(filter(lambda x : x.find(href = re.compile('playbyplay')) != None, soup.find_all(class_ = re.compile('gameCount'))))
 
-    def get_game_boxes_from_url(self, url):
-        return get_game_boxes_from_soup(get_soup_from_link(url))
-
-
-    def get_play_by_play_links(self, url):
-        links =  list(map(lambda x : url+ x['href'], get_soup_from_link(url).find_all('a', href = re.compile('playbyplay'))))
-        return links
-
-
-    def get_soups_from_links(self, ls):
-        return list(map(get_soup_from_link, ls)) 
-
     def get_play_by_play_link_from_box(self, box):
-        return self.baseUrl + box.find_next(href = re.compile('playbyplay'))['href']
+        return self.baseUrl + box.find(href = re.compile('playbyplay'))['href']
 
     def get_home_team_from_box(self, box):
         teamLink = box.find_next(class_ = 'team home').find_next(class_ = 'team-capsule').find_next(class_ = 'team-name').find_next(id = re.compile('TeamName'))
