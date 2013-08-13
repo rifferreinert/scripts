@@ -224,41 +224,61 @@ class gamePage:
         return self.baseUrl + box.find(href = re.compile('playbyplay'))['href']
 
     def get_home_team_from_box(self, box):
-        teamLink = box.find_next(class_ = 'team home').find_next(class_ = 'team-capsule').find_next(class_ = 'team-name').find_next(id = re.compile('TeamName'))
+        navigation = [{'attrs' : {'class' : 'team home'}},
+                      {'attrs' : {'class' : 'team-capsule'}},
+                      {'attrs' : {'class' : 'team-name'}},
+                      {'attrs' : {'id' : re.compile('TeamName')}}]
+        teamLink = box.navigate(navigation)
         if teamLink.a:
             return teamLink.a.string
         else:
             return teamLink.string
 
     def get_away_team_from_box(self, box):
-        teamLink = box.find_next(class_ = 'team visitor').find_next(class_ = 'team-capsule').find_next(class_ = 'team-name').find_next(id = re.compile('TeamName'))
+        navigation = [{'attrs' : {'class' : 'team visitor'}},
+                      {'attrs' : {'class' : 'team-capsule'}},
+                      {'attrs' : {'class' : 'team-name'}},
+                      {'attrs' : {'id' : re.compile('TeamName')}}]
+        teamLink = box.naviage(navigation)
         if teamLink.a:
             return teamLink.a.string
         else:
             return teamLink.string
 
     def get_home_score_from_box(self, box):
-        return box.find_next(class_ = 'team home').find_next(class_ = 'score').find_next(class_ = 'final').string
+        navigation = [{'attrs' : {'class' : 'team home'}},
+                      {'attrs' : {'class' : 'score'}},
+                      {'attrs' : {'class' : 'final'}}]
+        return box.navigate(navigation).string
 
     def get_away_score_from_box(self, box):
-        return box.find_next(class_ = 'team visitor').find_next(class_ = 'score').find_next(class_ = 'final').string
+        navigation = [{'attrs' : {'class' : 'team visitor'}},
+                      {'attrs' : {'class' : 'score'}},
+                      {'attrs' : {'class' : 'final'}}]
+        return box.navigate(navigation).string
 
     def get_home_record_from_box(self, box):
-        match =  re.compile(r'\((\d+-\d+),.*').search(box.find_next(class_ = 'team home').find_next(class_ = 'team-capsule').find_next(class_ = 'record').string)
+        navigation = [{'attrs' : {'class' : 'team home'}},
+                      {'attrs' : {'class' : 'team-capsule'}},
+                      {'attrs' : {'class' : 'record'}}]
+        match = re.compile(r'\((\d+-\d+),.*').search(box.navigate(navigation))
         if match:
             return match.group(1)
         else:
             return False
 
     def get_away_record_from_box(self, box):
-        match = re.compile(r'\((\d+-\d+),.*').search(box.find_next(class_ = 'team visitor').find_next(class_ = 'team-capsule').find_next(class_ = 'record').string)
+        navigation = [{'attrs' : {'class' : 'team visitor'}},
+                      {'attrs' : {'class' : 'team-capsule'}},
+                      {'attrs' : {'class' : 'record'}}]
+        match = re.compile(r'\((\d+-\d+),.*').search(box.navigate(navigation))
         if match :
             return match.group(1)
         else:
             return False
 
     def get_playoff_status_from_box(self, box):
-        note = box.find_next(id = re.compile('gameNote')).string
+        note = box.find(id = re.compile('gameNote')).string
         if note == '\xa0':
             return 'No Note'
         else:
