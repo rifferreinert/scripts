@@ -32,18 +32,6 @@ def get_acceptable_pages(url, choices):
             urlList.append((re.sub(r'(.*)\?.*' ,r'\1' + child['value'], url), child.string))
     return urlList
 
-def insert_into_database(shot, game, db):
-    cursor = db.cursor()
-    cursor.execute("""INSERT INTO game_table (home_team, away_team, home_score, away_score, playoff_status, game_date, home_wins, away_wins, home_losses, away_losses, tourney) 
-                   VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (str(game.homeTeam), str(game.awayTeam), str(game.homeScore), str(game.awayScore), str(game.playoffStatus), 
-                   game.date, str(game.homeWins), str(game.awayWins), str(game.homeLosses), str(game.awayLosses), str(game.tourney)))
-    gameID = cursor.lastrowid
-    cursor.execute("""INSERT INTO shot_table (game_id, success, time_remaining, player_name, shot_number, period, home_previous_score, away_previous_score, team) 
-                   VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
-                  (gameID, shot.success, shot.time, shot.playerName, shot.shotNumber, shot.period, shot.homeLastScore,
-                  shot.awayLastScore, shot.side))
-    db.commit()
-
 class shot:
     def __init__(self, time, success, shotNumber, playerName, teamName, homeLastScore, awayLastScore , period, side):
         self.time = time
@@ -55,6 +43,14 @@ class shot:
         self.awayLastScore = awayLastScore
         self.period = period
         self.side = side
+
+    def insert_into_database(self, gameID, db):
+        cursor = db.cursor()
+        cursor.execute("""INSERT INTO shot_table (game_id, success, time_remaining, player_name, shot_number, period, home_previous_score, away_previous_score, team) 
+               VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)""", 
+              (gameID, self.success, self.time, self.playerName, self.shotNumber, self.period, self.homeLastScore,
+              self.awayLastScore, self.side))
+
    
 class game:
     def __init__(self, url, date, homeTeam, homeScore, awayTeam, awayScore, playoffStatus, homeWins, homeLosses, awayWins, awayLosses, tourney):
@@ -70,12 +66,22 @@ class game:
         self.awayWins = awayWins
         self.awayLosses = awayLosses
         self.tourney = tourney
+    def insert_into_database(self, db):
+        cursor = db.cursor()
+        cursor.execute("""INSERT INTO game_table (home_team, away_team, home_score, away_score, playoff_status, game_date, home_wins, away_wins, home_losses, away_losses, tourney) 
+                       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (str(self.homeTeam), str(self.awayTeam), str(self.homeScore), str(self.awayScore), str(self.playoffStatus), 
+                       self.date, str(self.homeWins), str(self.awayWins), str(self.homeLosses), str(self.awayLosses), str(self.tourney)))
+        return cursor.lastrowid
 
     def evaluate_game(self, db):
-        if self.pbp.shots:
+        gameID = self.insert_into_database(db)
+        if self.pbp.shots and len(self.pbp.shots) > 0:
             for s in self.pbp.shots:
-                insert_into_database(s, self, db)
-
+                s.insert_into_database(gameID, db)
+                db.commit()
+        else:
+            db.rollback()
+                
 class playByPlays:
     def __init__(self, soup, homeTeam, awayTeam):
         self.homeTeam = homeTeam
