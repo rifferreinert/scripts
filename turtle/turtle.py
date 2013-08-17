@@ -170,7 +170,7 @@ class playByPlays:
                 lastThrowTime = time
                 lastPlayer = player
                 #make the shot
-                parsedShots.append(shot((time.strftime('%M:%S') - datetime.datetime(1900,1,1)).total_seconds(),success, numThrowsInARow + 1, player, team, awayPreviousScore, homePreviousScore, half, side))
+                parsedShots.append(shot((time - datetime.datetime(1900,1,1)).total_seconds(),success, numThrowsInARow + 1, player, team, homePreviousScore, awayPreviousScore, half, side))
             awayPreviousScore = int(re.compile(r'(\d+)-').search(ushotAttrs[2]).group(1))
             homePreviousScore = int(re.compile(r'.*-(\d+)').search(ushotAttrs[2]).group(1))
             previousTime = time 

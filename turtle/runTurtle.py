@@ -7,6 +7,13 @@ def chunks(l, n):
     for i in range(0, len(l), n):
         yield l[i:i+n]
 
+def evaluate_url(url, baseUrl, db):
+    print('evaluating ' + url) 
+    urlList = turtle.get_acceptable_pages(url, {'NIT', 'All', 'NCAA Tourney'})
+    pages = turtle.get_game_pages(urlList, baseUrl)
+    for page in pages:
+        page.evaluate_page(db)
+
 def main(url, baseUrl, startDate, endDate, dbName):
     open(dbName, 'w').close()
     db = sqlite3.connect(dbName)
@@ -19,20 +26,12 @@ def main(url, baseUrl, startDate, endDate, dbName):
     oneDay = datetime.timedelta(1) 
     urls = []
     dates = []
+    executor = ThreadPoolExecutor(max_workers = 8)
     while sd <= ed:
-        dates.append(sd)
-        urls.append(url + '?date=' + sd.strftime('%Y%m%d') + '&confId=50')
+        u = url + '?date=' + sd.strftime('%Y%m%d') + '&confId=50'
         sd += oneDay
-    executor = ThreadPoolExecutor(max_workers = 40)
-    for u in chunks(urls, 30):
-        u = executor.map(lambda x : turtle.get_acceptable_pages(x, {'NIT', 'All', 'NCAA Tourney'}), u)
-        urlList = []
-        for url in u:
-            urlList += url
-        print('about to load game pages')
-        pages = turtle.get_game_pages(urlList, baseUrl)
-        for page in pages:
-            page.evaluate_page(db)
+        evaluate_url(u, baseUrl, db)
+    executor.shutdown(wait=True)
     db.close()
 
         
