@@ -6,11 +6,11 @@ import re
 import sys
 import scraper
 
-def get_game_pages(urlList, baseUrl):
+def get_game_pages(urlList, baseUrl, league = None):
     """quickly makes game pages from a list or urls"""
     exp = re.compile(r'date=(\d+)')
     urlList = list(urlList)
-    return map(lambda x : gamePage(x[0], exp.search(x[1]).group(1), baseUrl, x[2]),
+    return map(lambda x : gamePage(x[0], exp.search(x[1]).group(1), baseUrl, x[2], league),
                zip(scraper.soup_links(map(lambda y : y[0], urlList), 40, 0), 
                map(lambda y : y[0], urlList), 
                map(lambda y : y[1], urlList))) 
@@ -143,25 +143,25 @@ class playByPlays:
             if re.compile(r'(?i)Free\s+Throw').search(action):
                 #find player name
                 #name should come just before 'made' or 'missed'
-                nameMatch = re.compile(r'(?i)(.+\S)\s+(made|missed)').search(action)
+                nameMatch = re.compile(r'(?i)(.+\S)\s+(made|missed|makes|misses)').search(action)
                 if nameMatch:
                     #remove any extra spaces
                     player = re.sub('\s+', ' ', nameMatch.group(1))
                 else:
                     #for some the first re didn't match. Assume the player's name is the 
                     #first two words
-                    nameMatch = re.compile(r'(?i)(/w+)\s+(/w+)').search(action)
+                    nameMatch = re.compile(r'(?i)(\w+)\s+(\w+)').search(action)
                     if nameMatch:
                         player = nameMatch.group(1) + nameMatch.group(2)
                     else:
-                        player = 'no player name found'
+                        player = None
                 #was the throw a success?
-                if re.compile(r'(?i)made').search(action):
+                if re.compile(r'(?i)(made)|(makes)').search(action):
                     success = 1
-                elif re.compile(r'(?i)missed').search(action):
+                elif re.compile(r'(?i)(missed)|(misses)').search(action):
                     success = 0
                 else:
-                    success = 'NULL'
+                    success = None
                 #run logic to count consecutive shots
                 if lastPlayer == player and time == lastThrowTime:
                     numThrowsInARow += 1
@@ -178,18 +178,18 @@ class playByPlays:
 
 
 class gamePage:
-    def __init__(self, soup, date, baseUrl, tourney):
+    def __init__(self, soup, date, baseUrl, tourney, league = None):
         self.date = date 
         self.baseUrl = baseUrl
         self.soup = soup
         self.tourney = tourney
+        self.league = league
+        self.games = []
        
     def evaluate_page(self, db):
         self.boxes = self.get_game_boxes_from_soup(self.soup)
-        self.games = []
         for box in self.boxes:
             try:
-                ht = self.get_home_team_from_box(box)
                 ht = self.get_home_team_from_box(box)
                 at = self.get_away_team_from_box(box)
                 hs = self.get_home_score_from_box(box)
@@ -216,7 +216,7 @@ class gamePage:
             except Exception as e:
                 print('Error reading ' + str(self.date))
                 print(e)
-
+                print(sys.exc_info())
         #download playbyplays and add them to the game objects
         for g, plays in zip(self.games, get_play_by_plays(map(lambda x : (x.url, x.homeTeam, x.awayTeam), self.games))):
             g.pbp = plays
@@ -224,43 +224,76 @@ class gamePage:
 
 
     def get_game_boxes_from_soup(self, soup):
-        return list(filter(lambda x : x.find(href = re.compile('playbyplay')) != None, soup.find_all(attrs = {'id' : re.compile('gameHeader')})))
+        if self.league == 'nba':
+            return list(filter(lambda x : x.find(href = re.compile('playbyplay')) != None, soup.find_all(attrs = {'id' : re.compile('gamebox')})))
+
+        else:
+            return list(filter(lambda x : x.find(href = re.compile('playbyplay')) != None, soup.find_all(attrs = {'id' : re.compile('gameHeader')})))
 
     def get_play_by_play_link_from_box(self, box):
-        return self.baseUrl + box.find(href = re.compile('playbyplay'))['href']
+        return self.baseUrl + box.find(href = re.compile('playbyplay'))['href'] + '&period=0'
 
     def get_home_team_from_box(self, box):
-        navigation = [{'attrs' : {'class' : 'team home'}},
-                      {'attrs' : {'class' : 'team-capsule'}},
-                      {'attrs' : {'class' : 'team-name'}},
-                      {'attrs' : {'id' : re.compile('TeamName')}}]
-        teamLink = scraper.navigate(box, navigation)
-        if teamLink.a:
-            return teamLink.a.string
+        if self.league == 'wnba':
+            navigation = [{'attrs' : {'class' : 'team home'}},
+                          {'attrs' : {'class' : 'team-capsule'}},
+                          {'attrs' : {'class' : 'team-name'}}]
+            team = scraper.navigate(box, navigation)
+            return team.find_all('span')[1].string
         else:
-            return teamLink.string
+            navigation = [{'attrs' : {'class' : 'team home'}},
+                          {'attrs' : {'class' : 'team-capsule'}},
+                          {'attrs' : {'class' : 'team-name'}},
+                          {'attrs' : {'id' : re.compile('TeamName')}}]
+            teamLink = scraper.navigate(box, navigation)
+            if teamLink.a:
+                return teamLink.a.string
+            else:
+                return teamLink.string
 
     def get_away_team_from_box(self, box):
-        navigation = [{'attrs' : {'class' : 'team visitor'}},
-                      {'attrs' : {'class' : 'team-capsule'}},
-                      {'attrs' : {'class' : 'team-name'}},
-                      {'attrs' : {'id' : re.compile('TeamName')}}]
-        teamLink = scraper.navigate(box, navigation)
-        if teamLink.a:
-            return teamLink.a.string
+        if self.league == 'wnba' :
+            navigation = [{'attrs' : {'class' : 'team visitor'}},
+                          {'attrs' : {'class' : 'team-capsule'}},
+                          {'attrs' : {'class' : 'team-name'}}]
+            team = scraper.navigate(box, navigation)
+            return team.find_all('span')[1].string
+        elif self.league == 'nba':
+            navigation = [{'attrs' : {'class' : 'team away'}},
+                          {'attrs' : {'class' : 'team-capsule'}},
+                          {'attrs' : {'class' : 'team-name'}},
+                          {'attrs' : {'id' : re.compile('TeamName')}}]
+            teamLink = scraper.navigate(box, navigation)
+            if teamLink.a:
+                return teamLink.a.string
+            else:
+                return teamLink.string
         else:
-            return teamLink.string
+            navigation = [{'attrs' : {'class' : 'team visitor'}},
+                          {'attrs' : {'class' : 'team-capsule'}},
+                          {'attrs' : {'class' : 'team-name'}},
+                          {'attrs' : {'id' : re.compile('TeamName')}}]
+            teamLink = scraper.navigate(box, navigation)
+            if teamLink.a:
+                return teamLink.a.string
+            else:
+                return teamLink.string
 
     def get_home_score_from_box(self, box):
         navigation = [{'attrs' : {'class' : 'team home'}},
                       {'attrs' : {'class' : 'score'}},
-                      {'attrs' : {'class' : 'final'}}]
+                      {'attrs' : {'class' : re.compile('final')}}]
         return scraper.navigate(box, navigation).string
 
     def get_away_score_from_box(self, box):
-        navigation = [{'attrs' : {'class' : 'team visitor'}},
-                      {'attrs' : {'class' : 'score'}},
-                      {'attrs' : {'class' : 'final'}}]
+        if self.league == 'nba':
+            navigation = [{'attrs' : {'class' : 'team away'}},
+                          {'attrs' : {'class' : 'score'}},
+                          {'attrs' : {'class' : re.compile('final')}}]
+        else:
+            navigation = [{'attrs' : {'class' : 'team visitor'}},
+                          {'attrs' : {'class' : 'score'}},
+                          {'attrs' : {'class' : re.compile('final')}}]
         return scraper.navigate(box, navigation).string
 
     def get_home_record_from_box(self, box):
@@ -274,9 +307,14 @@ class gamePage:
             return False
 
     def get_away_record_from_box(self, box):
-        navigation = [{'attrs' : {'class' : 'team visitor'}},
-                      {'attrs' : {'class' : 'team-capsule'}},
-                      {'attrs' : {'class' : 'record'}}]
+        if self.league == 'nba':
+            navigation = [{'attrs' : {'class' : 'team away'}},
+                          {'attrs' : {'class' : 'team-capsule'}},
+                          {'attrs' : {'class' : 'record'}}]
+        else:
+            navigation = [{'attrs' : {'class' : 'team visitor'}},
+                          {'attrs' : {'class' : 'team-capsule'}},
+                          {'attrs' : {'class' : 'record'}}]
         match = re.compile(r'\((\d+-\d+),.*').search(scraper.navigate(box, navigation).string)
         if match :
             return match.group(1)
