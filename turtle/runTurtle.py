@@ -9,8 +9,8 @@ def chunks(l, n):
 
 def evaluate_url(url, baseUrl, db):
     print('evaluating ' + url) 
-    #urlList = turtle.get_acceptable_pages(url, {'NIT', 'All', 'NCAA Tourney'})
-    pages = turtle.get_game_pages([(url, 'N/A')], baseUrl, 'nba')
+    urlList = turtle.get_acceptable_pages(url, {'NIT', 'All', 'NCAA Tourney'})
+    pages = turtle.get_game_pages(urlList, baseUrl)
     for page in pages:
         page.evaluate_page(db)
 

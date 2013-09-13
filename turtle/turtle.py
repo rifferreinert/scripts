@@ -88,23 +88,36 @@ class playByPlays:
         self.awayTeam = awayTeam
        # self.shots = self.get_shots_from_box(self.get_shot_box_from_soup(get_soup_from_link(url)))
         self.soup = soup
-        self.shots = self.get_shots_from_box(self.get_shot_box_from_soup(self.soup))
-    
+        self.shotBox = self.get_shot_box_from_soup(self.soup)
+        self.shots = []
+        shotsLeft = True
+        period = 0
+        shot = self.shotBox
+        while shotsLeft:
+            shot = shot.find_next(re.compile(r'(tr)|(thead)'))
+            if not shot:
+                shotsLeft = False
+            else:
+                if re.compile(r'thead').search(shot.name):
+                    period += 1
+                else:
+                    shot_class = shot.get('class')
+                    if shot_class and re.compile(r'(odd)|(even)').search(shot_class[0]):
+                        self.shots.append((shot, period))
+
+        self.shots = self.parse_shots(self.shots)
+         
     def get_shot_box_from_soup(self, soup):
         try:
-            shotBox =  soup.find(class_ = 'mod-container').find(class_ = 'mod-content')
-            return shotBox
+            shotBox = soup.find(class_ = 'mod-container').find(class_ = 'mod-content')
+            return shotBox 
         except:
             return None 
 
-    def get_shots_from_box(self, box):
-        if not box:
-            return None
+    def parse_shots(self, shots):
         parsedShots = []
-        shots = box.find_all(class_ = re.compile(r'(odd)|(even)'))
         action = ''
         time = ''
-        previousTime = ''
         nextScore = ''
         numThrowsInARow = 0
         lastPlayer = ''
@@ -112,23 +125,15 @@ class playByPlays:
         awayPreviousScore = 0
         homePreviousScore = 0
         success = 0
-        half = 1
         lastThrowTime = ''
         team = ''
         for ushot in shots:
+            period = ushot[1]
+            ushot = ushot[0]
             ushotAttrs = list(attr.string for attr in ushot.find_all('td'))
             if len(ushotAttrs) != 4:
                 continue
             time = datetime.datetime.strptime(ushotAttrs[0], '%M:%S')
-            #if we went back in time that means we are in the next half of the game
-
-            if previousTime == '':
-                previousTime = time
-            if (previousTime - time).days < 0:
-                previousTime = '' 
-                half += 1
-                numThrowsInARow = 0
-            
             if ushotAttrs[1] == '\xa0':
                 action = ushotAttrs[3]
                 team = self.homeTeam
@@ -163,17 +168,17 @@ class playByPlays:
                 else:
                     success = None
                 #run logic to count consecutive shots
-                if lastPlayer == player and time == lastThrowTime:
+                if lastPlayer == player and time == lastThrowTime and period = lastPeriod:
                     numThrowsInARow += 1
                 else:
                     numThrowsInARow = 0
                 lastThrowTime = time
                 lastPlayer = player
+                lastPeriod = period
                 #make the shot
-                parsedShots.append(shot((time - datetime.datetime(1900,1,1)).total_seconds(),success, numThrowsInARow + 1, player, team, homePreviousScore, awayPreviousScore, half, side))
+                parsedShots.append(shot((time - datetime.datetime(1900,1,1)).total_seconds(),success, numThrowsInARow + 1, player, team, homePreviousScore, awayPreviousScore, period, side))
             awayPreviousScore = int(re.compile(r'(\d+)-').search(ushotAttrs[2]).group(1))
             homePreviousScore = int(re.compile(r'.*-(\d+)').search(ushotAttrs[2]).group(1))
-            previousTime = time 
         return parsedShots
 
 
