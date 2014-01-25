@@ -9,8 +9,10 @@ def chunks(l, n):
 
 def evaluate_url(url, baseUrl, db):
     print('evaluating ' + url) 
-    urlList = turtle.get_acceptable_pages(url, {'NIT', 'All', 'NCAA Tourney'})
-    pages = turtle.get_game_pages(urlList, baseUrl)
+    #urlList = turtle.get_acceptable_pages(url, {'NIT', 'All', 'NCAA Tourney'})
+    urlList = [(url, 'All')]
+    pages = turtle.get_game_pages(urlList, baseUrl, 'wnba')
+    print("evaluate page") 
     for page in pages:
         page.evaluate_page(db)
 
@@ -30,7 +32,9 @@ def main(url, baseUrl, startDate, endDate, dbName):
     while sd <= ed:
         u = url + '?date=' + sd.strftime('%Y%m%d')# + '&confId=50'
         sd += oneDay
+        print("URL: " + u)
         evaluate_url(u, baseUrl, db)
+    print("after")
     executor.shutdown(wait=True)
     db.close()
 

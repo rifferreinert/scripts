@@ -30,6 +30,7 @@ def get_acceptable_pages(url, choices):
     for child in selections.children:
         if child.string in choices:
             urlList.append((re.sub(r'(.*)\?.*' ,r'\1' + child['value'], url), child.string))
+    print("acceptable pages: {}".format(str(urlList)))
     return urlList
 
 class shot:
@@ -86,13 +87,15 @@ class playByPlays:
     def __init__(self, soup, homeTeam, awayTeam):
         self.homeTeam = homeTeam
         self.awayTeam = awayTeam
-       # self.shots = self.get_shots_from_box(self.get_shot_box_from_soup(get_soup_from_link(url)))
+      #  self.shots = self.get_shots_from_box(self.get_shot_box_from_soup(get_soup_from_link(url)))
         self.soup = soup
         self.shotBox = self.get_shot_box_from_soup(self.soup)
         self.shots = []
         shotsLeft = True
         period = 0
         shot = self.shotBox
+        if not shot:
+            shotsLeft = False
         while shotsLeft:
             shot = shot.find_next(re.compile(r'(tr)|(thead)'))
             if not shot:
@@ -115,6 +118,8 @@ class playByPlays:
             return None 
 
     def parse_shots(self, shots):
+        if len(shots) == 0:
+            return None
         parsedShots = []
         action = ''
         time = ''
@@ -144,6 +149,7 @@ class playByPlays:
                 side= 'away'
             if not action:
                 continue
+
             #check to make sure it's a free throw
             if re.compile(r'(?i)Free\s+Throw').search(action):
                 #find player name
@@ -168,7 +174,7 @@ class playByPlays:
                 else:
                     success = None
                 #run logic to count consecutive shots
-                if lastPlayer == player and time == lastThrowTime and period = lastPeriod:
+                if lastPlayer == player and time == lastThrowTime and period == lastPeriod:
                     numThrowsInARow += 1
                 else:
                     numThrowsInARow = 0
@@ -179,6 +185,7 @@ class playByPlays:
                 parsedShots.append(shot((time - datetime.datetime(1900,1,1)).total_seconds(),success, numThrowsInARow + 1, player, team, homePreviousScore, awayPreviousScore, period, side))
             awayPreviousScore = int(re.compile(r'(\d+)-').search(ushotAttrs[2]).group(1))
             homePreviousScore = int(re.compile(r'.*-(\d+)').search(ushotAttrs[2]).group(1))
+        parsedShots.append(shot(1201, 0, 0, '','', homePreviousScore, awayPreviousScore,0,''))
         return parsedShots
 
 
